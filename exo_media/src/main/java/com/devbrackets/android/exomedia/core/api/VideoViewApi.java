@@ -40,14 +40,6 @@ import java.util.Map;
  */
 public interface VideoViewApi {
 
-    interface OnSurfaceSizeChanged {
-        void onSurfaceSizeChanged(int width, int height);
-    }
-
-    int getHeight();
-
-    int getWidth();
-
     void setVideoUri(@Nullable Uri uri);
 
     void setVideoUri(@Nullable Uri uri, @Nullable MediaSource mediaSource);

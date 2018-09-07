@@ -256,7 +256,7 @@ public class ResizingTextureView extends TextureView implements ClearableSurface
      * @param height The height for the video
      * @return True if the surfaces DefaultBufferSize was updated
      */
-    protected boolean updateVideoSize(int width, int height) {
+    public boolean updateVideoSize(int width, int height) {
         matrixManager.setIntrinsicVideoSize(width, height);
         updateMatrixOnLayout();
 

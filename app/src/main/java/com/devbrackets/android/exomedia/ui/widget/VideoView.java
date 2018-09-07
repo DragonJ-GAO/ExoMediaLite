@@ -44,6 +44,9 @@ import com.devbrackets.android.exomedia.core.ListenerMux;
 import com.devbrackets.android.exomedia.core.api.VideoViewApi;
 import com.devbrackets.android.exomedia.core.exoplayer.ExoMediaPlayer;
 import com.devbrackets.android.exomedia.core.listener.MetadataListener;
+import com.devbrackets.android.exomedia.core.video.ResizingTextureView;
+import com.devbrackets.android.exomedia.core.video.exo.ExoTextureVideoView;
+import com.devbrackets.android.exomedia.core.video.exo.ExoVideoDelegate;
 import com.devbrackets.android.exomedia.core.video.scale.ScaleType;
 import com.devbrackets.android.exomedia.listener.OnBufferUpdateListener;
 import com.devbrackets.android.exomedia.listener.OnCompletionListener;
@@ -75,8 +78,10 @@ public class VideoView extends RelativeLayout {
     protected VideoControls videoControls;
     protected ImageView previewImageView;
 
-    protected Uri videoUri;
-    protected VideoViewApi videoViewImpl;
+    //    protected Uri videoUri;
+//    protected VideoViewApi videoViewImpl;
+    protected ExoVideoDelegate delegate;
+    protected ResizingTextureView textureView;
 
     protected AudioManager audioManager;
     @NonNull
@@ -93,6 +98,7 @@ public class VideoView extends RelativeLayout {
 
     protected boolean releaseOnDetachFromWindow = true;
     protected boolean handleAudioFocus = true;
+    protected boolean keepBuffer = true;
 
     public VideoView(Context context) {
         super(context);
@@ -127,7 +133,7 @@ public class VideoView extends RelativeLayout {
 
     @Override
     public void setOnTouchListener(OnTouchListener listener) {
-        videoViewImpl.setOnTouchListener(listener);
+        textureView.setOnTouchListener(listener);
         super.setOnTouchListener(listener);
     }
 
@@ -154,8 +160,9 @@ public class VideoView extends RelativeLayout {
         videoControls = null;
         stopPlayback();
         overriddenPositionStopWatch.stop();
-
-        videoViewImpl.release();
+        if (!keepBuffer && delegate != null) {
+            delegate.release();
+        }
     }
 
     /**
@@ -255,56 +262,6 @@ public class VideoView extends RelativeLayout {
     }
 
     /**
-     * Sets the Uri location for the video to play
-     *
-     * @param uri The video's Uri
-     */
-    public void setVideoURI(@Nullable Uri uri) {
-        videoUri = uri;
-        videoViewImpl.setVideoUri(uri);
-
-        if (videoControls != null) {
-            videoControls.showLoading(true);
-        }
-    }
-
-    /**
-     * Sets the Uri location for the video to play
-     *
-     * @param uri The video's Uri
-     * @param mediaSource MediaSource that should be used
-     */
-    public void setVideoURI(@Nullable Uri uri, @Nullable MediaSource mediaSource) {
-        videoUri = uri;
-        videoViewImpl.setVideoUri(uri, mediaSource);
-
-        if (videoControls != null) {
-            videoControls.showLoading(true);
-        }
-    }
-
-    /**
-     * Sets the path to the video.  This path can be a web address (e.g. http://) or
-     * an absolute local path (e.g. file://)
-     *
-     * @param path The path to the video
-     */
-    public void setVideoPath(String path) {
-        setVideoURI(Uri.parse(path));
-    }
-
-    /**
-     * Retrieves the current Video URI.  If this hasn't been set with {@link #setVideoURI(android.net.Uri)}
-     * or {@link #setVideoPath(String)} then null will be returned.
-     *
-     * @return The current video URI or null
-     */
-    @Nullable
-    public Uri getVideoUri() {
-        return videoUri;
-    }
-
-    /**
      * Sets the {@link MediaDrmCallback} to use when handling DRM for media.
      * This should be called before specifying the videos uri or path
      * <br>
@@ -313,7 +270,8 @@ public class VideoView extends RelativeLayout {
      * @param drmCallback The callback to use when handling DRM media
      */
     public void setDrmCallback(@Nullable MediaDrmCallback drmCallback) {
-        videoViewImpl.setDrmCallback(drmCallback);
+        if (delegate == null) return;
+        delegate.setDrmCallback(drmCallback);
     }
 
     /**
@@ -324,7 +282,8 @@ public class VideoView extends RelativeLayout {
      * @return True if the volume was set
      */
     public boolean setVolume(@FloatRange(from = 0.0, to = 1.0) float volume) {
-        return videoViewImpl.setVolume(volume);
+        if (delegate == null) return false;
+        return delegate.setVolume(volume);
     }
 
     /**
@@ -345,7 +304,8 @@ public class VideoView extends RelativeLayout {
      */
     public void reset() {
         stopPlayback();
-        setVideoURI(null);
+        // ??
+        if (!keepBuffer && delegate != null) delegate.setVideoUri(null);
     }
 
     /**
@@ -357,8 +317,8 @@ public class VideoView extends RelativeLayout {
         if (videoControls != null) {
             videoControls.showLoading(false);
         }
-
-        videoViewImpl.seekTo(milliSeconds);
+        if (delegate != null)
+            delegate.seekTo(milliSeconds);
     }
 
     /**
@@ -367,7 +327,7 @@ public class VideoView extends RelativeLayout {
      * @return True if a video is playing
      */
     public boolean isPlaying() {
-        return videoViewImpl.isPlaying();
+        return delegate.isPlaying();
     }
 
     /**
@@ -376,11 +336,10 @@ public class VideoView extends RelativeLayout {
      * prepared (see {@link #setOnPreparedListener(OnPreparedListener)})
      */
     public void start() {
-        if (!audioFocusHelper.requestFocus()) {
+        if (!audioFocusHelper.requestFocus() || delegate == null) {
             return;
         }
-
-        videoViewImpl.start();
+        delegate.start();
         setKeepScreenOn(true);
 
         if (videoControls != null) {
@@ -406,8 +365,10 @@ public class VideoView extends RelativeLayout {
         if (!transientFocusLoss) {
             audioFocusHelper.abandonFocus();
         }
-
-        videoViewImpl.pause();
+        if (delegate == null) {
+            return;
+        }
+        delegate.pause();
         setKeepScreenOn(false);
 
         if (videoControls != null) {
@@ -428,11 +389,7 @@ public class VideoView extends RelativeLayout {
      * @return {@code true} if the video was successfully restarted, otherwise {@code false}
      */
     public boolean restart() {
-        if (videoUri == null) {
-            return false;
-        }
-
-        if (videoViewImpl.restart()) {
+        if (delegate != null && delegate.restart()) {
             if (videoControls != null) {
                 videoControls.showLoading(true);
             }
@@ -447,7 +404,9 @@ public class VideoView extends RelativeLayout {
      */
     public void suspend() {
         audioFocusHelper.abandonFocus();
-        videoViewImpl.suspend();
+        if (delegate != null) {
+            delegate.suspend();
+        }
         setKeepScreenOn(false);
 
         if (videoControls != null) {
@@ -466,8 +425,8 @@ public class VideoView extends RelativeLayout {
         if (overriddenDuration >= 0) {
             return overriddenDuration;
         }
-
-        return videoViewImpl.getDuration();
+        if (delegate != null) return delegate.getDuration();
+        return -1;
     }
 
     /**
@@ -492,8 +451,9 @@ public class VideoView extends RelativeLayout {
         if (overridePosition) {
             return positionOffset + overriddenPositionStopWatch.getTimeInt();
         }
-
-        return positionOffset + videoViewImpl.getCurrentPosition();
+        if (delegate != null)
+            return positionOffset + delegate.getCurrentPosition();
+        return positionOffset;
     }
 
     /**
@@ -538,7 +498,8 @@ public class VideoView extends RelativeLayout {
      * @return The integer percent that is buffered [0, 100] inclusive
      */
     public int getBufferPercentage() {
-        return videoViewImpl.getBufferedPercent();
+        if (delegate != null) return delegate.getBufferedPercent();
+        return -1;
     }
 
     /**
@@ -548,7 +509,7 @@ public class VideoView extends RelativeLayout {
      * @return True if the speed was set
      */
     public boolean setPlaybackSpeed(float speed) {
-        return videoViewImpl.setPlaybackSpeed(speed);
+        return delegate.setPlaybackSpeed(speed);
     }
 
     /**
@@ -558,18 +519,20 @@ public class VideoView extends RelativeLayout {
      * @return True if tracks can be manually specified
      */
     public boolean trackSelectionAvailable() {
-        return videoViewImpl.trackSelectionAvailable();
+        if (delegate == null) return false;
+        return delegate.trackSelectionAvailable();
     }
 
     /**
      * Changes to the track with <code>trackIndex</code> for the specified
      * <code>trackType</code>
      *
-     * @param trackType The type for the track to switch to the selected index
+     * @param trackType  The type for the track to switch to the selected index
      * @param trackIndex The index for the track to switch to
      */
     public void setTrack(ExoMedia.RendererType trackType, int trackIndex) {
-        videoViewImpl.setTrack(trackType, trackIndex);
+        if (delegate == null) return;
+        delegate.setTrack(trackType, trackIndex);
     }
 
     /**
@@ -580,7 +543,8 @@ public class VideoView extends RelativeLayout {
      */
     @Nullable
     public Map<ExoMedia.RendererType, TrackGroupArray> getAvailableTracks() {
-        return videoViewImpl.getAvailableTracks();
+        if (delegate == null) return null;
+        return delegate.getAvailableTracks();
     }
 
     /**
@@ -589,7 +553,7 @@ public class VideoView extends RelativeLayout {
      * @param scaleType how to scale the videos
      */
     public void setScaleType(@NonNull ScaleType scaleType) {
-        videoViewImpl.setScaleType(scaleType);
+        textureView.setScaleType(scaleType);
     }
 
     /**
@@ -598,7 +562,7 @@ public class VideoView extends RelativeLayout {
      * @param measureBasedOnAspectRatioEnabled whether to measure using the video's aspect ratio or not
      */
     public void setMeasureBasedOnAspectRatioEnabled(boolean measureBasedOnAspectRatioEnabled) {
-        videoViewImpl.setMeasureBasedOnAspectRatioEnabled(measureBasedOnAspectRatioEnabled);
+        textureView.setMeasureBasedOnAspectRatioEnabled(measureBasedOnAspectRatioEnabled);
     }
 
     /**
@@ -607,7 +571,7 @@ public class VideoView extends RelativeLayout {
      * @param rotation The rotation to apply to the video
      */
     public void setVideoRotation(@IntRange(from = 0, to = 359) int rotation) {
-        videoViewImpl.setVideoRotation(rotation, true);
+        textureView.setVideoRotation(rotation, true);
     }
 
     /**
@@ -677,7 +641,7 @@ public class VideoView extends RelativeLayout {
      * Returns a {@link Bitmap} representation of the current contents of the
      * view. If the surface isn't ready or we cannot access it for some reason then
      * <code>null</code> will be returned instead.
-     *
+     * <p>
      * <b>NOTE:</b> Only the <code>TextureView</code> implementations support getting the bitmap
      * meaning that if the backing implementation is a <code>SurfaceView</code> then the result
      * will always be <code>null</code>
@@ -686,8 +650,8 @@ public class VideoView extends RelativeLayout {
      */
     @Nullable
     public Bitmap getBitmap() {
-        if (videoViewImpl instanceof TextureView) {
-            return ((TextureView) videoViewImpl).getBitmap();
+        if (textureView instanceof TextureView) {
+            return ((TextureView) textureView).getBitmap();
         }
 
         return null;
@@ -698,7 +662,7 @@ public class VideoView extends RelativeLayout {
      * determining the backing implementation and reading xml attributes
      *
      * @param context The context to use for setting up the view
-     * @param attrs The xml attributes associated with this instance
+     * @param attrs   The xml attributes associated with this instance
      */
     protected void setup(Context context, @Nullable AttributeSet attrs) {
         if (isInEditMode()) {
@@ -717,19 +681,21 @@ public class VideoView extends RelativeLayout {
      * backing layout, linking the implementation, and finding the necessary view
      * references.
      *
-     * @param context The context for the initialization
+     * @param context            The context for the initialization
      * @param attributeContainer The attributes associated with this instance
      */
     protected void initView(Context context, @NonNull AttributeContainer attributeContainer) {
         inflateVideoView(context, attributeContainer);
 
         previewImageView = findViewById(R.id.video_preview_image);
-        videoViewImpl = findViewById(R.id.exo_video_view);
+        textureView = findViewById(R.id.exo_video_view);
 
         muxNotifier = new MuxNotifier();
         listenerMux = new ListenerMux(muxNotifier);
 
-        videoViewImpl.setListenerMux(listenerMux);
+        if (delegate != null) {
+            delegate.setListenerMux(listenerMux);
+        }
     }
 
     /**
@@ -756,7 +722,7 @@ public class VideoView extends RelativeLayout {
      * Inflates the video view layout, replacing the {@link ViewStub} with the
      * correct backing implementation.
      *
-     * @param context The context to use for inflating the correct video view
+     * @param context            The context to use for inflating the correct video view
      * @param attributeContainer The attributes for retrieving custom backing implementations.
      */
     protected void inflateVideoView(@NonNull Context context, @NonNull AttributeContainer attributeContainer) {
@@ -782,7 +748,7 @@ public class VideoView extends RelativeLayout {
      */
     protected void stopPlayback(boolean clearSurface) {
         audioFocusHelper.abandonFocus();
-        videoViewImpl.stopPlayback(clearSurface);
+        delegate.stopPlayback(clearSurface);
         setKeepScreenOn(false);
 
         if (videoControls != null) {
@@ -912,8 +878,9 @@ public class VideoView extends RelativeLayout {
         @SuppressWarnings("SuspiciousNameCombination")
         public void onVideoSizeChanged(int width, int height, int unAppliedRotationDegrees, float pixelWidthHeightRatio) {
             //NOTE: Android 5.0+ will always have an unAppliedRotationDegrees of 0 (ExoPlayer already handles it)
-            videoViewImpl.setVideoRotation(unAppliedRotationDegrees, false);
-            videoViewImpl.onVideoSizeChanged(width, height);
+            textureView.setVideoRotation(unAppliedRotationDegrees, false);
+            textureView.updateVideoSize(width, height);
+            textureView.requestLayout();
 
             if (videoSizeChangedListener != null) {
                 videoSizeChangedListener.onVideoSizeChanged(width, height);
@@ -997,7 +964,7 @@ public class VideoView extends RelativeLayout {
          * Reads the attributes associated with this view, setting any values found
          *
          * @param context The context to retrieve the styled attributes with
-         * @param attrs The {@link AttributeSet} to retrieve the values from
+         * @param attrs   The {@link AttributeSet} to retrieve the values from
          */
         public AttributeContainer(@NonNull Context context, @Nullable AttributeSet attrs) {
             if (attrs == null) {
